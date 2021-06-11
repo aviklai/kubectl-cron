@@ -2,18 +2,19 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/gorhill/cronexpr"
+	"github.com/adhocore/gronx"
 	"github.com/spf13/cobra"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/tools/clientcmd/api"
 )
 
 var (
@@ -24,20 +25,24 @@ var (
 	# view all cronjobs missed runs
 	%[1]s ns --missed
 `
-
-	errNoContext = fmt.Errorf("no context is currently set, use %q to select a new one", "kubectl config use-context <context>")
 )
 
 type CronOptions struct {
-	configFlags *genericclioptions.ConfigFlags
-
-	rawConfig       api.Config
+	configFlags     *genericclioptions.ConfigFlags
 	chosenNamespace string
-	numberOfMissed  int32
-
-	args []string
-
+	format          string
+	missed          bool
+	debug           bool
+	args            []string
 	genericclioptions.IOStreams
+}
+
+type Output struct {
+	Schedule         string
+	LastScheduleTime string
+	NextScheduleTime string
+	Suspended        bool
+	Missed           string
 }
 
 func NewCronOptions(streams genericclioptions.IOStreams) *CronOptions {
@@ -69,7 +74,9 @@ func NewCmdCron(streams genericclioptions.IOStreams) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&o.chosenNamespace, "namespace", "n", "default", "Namespace for search. (default: \"default\")")
-	cmd.Flags().Int32VarP(&o.numberOfMissed, "missed", "m", 1, "Number of missed runs")
+	cmd.Flags().StringVarP(&o.format, "format", "f", "json", "The format of the output. Possible choices: json, table")
+	cmd.Flags().BoolVarP(&o.missed, "missed", "m", false, "Show only missed runs")
+	cmd.Flags().BoolVarP(&o.debug, "debug", "d", false, "Debug")
 
 	return cmd
 }
@@ -83,17 +90,56 @@ func (o *CronOptions) Validate() error {
 	return nil
 }
 
-func (o *CronOptions) CheckMissedCrons(cronName string, schedule string, lastScheduleTime time.Time, suspend bool) {
-	if suspend == true {
+func (o *CronOptions) CheckMissedCrons(cronName string, schedule string, lastScheduleTime time.Time, suspend bool, output map[string]Output) {
+	if o.missed && suspend {
 		return
 	}
-	expr := cronexpr.MustParse(schedule)
-	nextTime := expr.Next(lastScheduleTime)
-	// fmt.Fprintf(o.Out, "Cron name: %s. Next cron time: %s\n", cronName, nextTime.String())
-	dt := time.Now()
-	if nextTime.Before(dt) {
-		fmt.Fprintf(o.Out, "Cron name: %s. Cron missed it's run!. Current time: %s", cronName, dt.String())
+
+	gron := gronx.New()
+	missedRun, _ := gron.IsDue(schedule)
+	lastScheduleTimeFormatted := lastScheduleTime.Format(time.RFC3339)
+	missedRunText := ""
+	if missedRun {
+		missedRunText = fmt.Sprintf(" Cron missed it's run!. Last run time: %s", lastScheduleTime.Format(time.RFC3339))
 	}
+	cronOutput := Output{
+		Schedule:         schedule,
+		LastScheduleTime: lastScheduleTimeFormatted,
+		Suspended:        suspend,
+		Missed:           missedRunText,
+	}
+
+	if o.missed {
+		if missedRun {
+			output[cronName] = cronOutput
+		}
+	} else {
+		output[cronName] = cronOutput
+	}
+}
+
+func (o *CronOptions) PrintAsJson(output map[string]Output) error {
+	jsonOutput, err := json.Marshal(output)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(o.Out, "%s", jsonOutput)
+	return nil
+}
+
+func (o *CronOptions) PrintAsTable(output map[string]Output) error {
+	t := table.NewWriter()
+	t.SetOutputMirror(o.Out)
+	t.AppendHeader(table.Row{"#", "Cron Name", "Cron Schedule", "Last Schedule Time", "Suspended", "Missed"})
+	index := 0
+	for k, v := range output {
+		index++
+		t.AppendRow(table.Row{index, k, v.Schedule, v.LastScheduleTime, v.Suspended, v.Missed})
+		t.AppendSeparator()
+	}
+	t.Render()
+	return nil
 }
 
 func (o *CronOptions) Run() error {
@@ -111,18 +157,35 @@ func (o *CronOptions) Run() error {
 		return err
 	}
 
-	fmt.Fprintf(o.Out, "Chosen namespace: %s\n", o.chosenNamespace)
+	if o.debug {
+		fmt.Fprintf(o.Out, "Chosen namespace: %s\n", o.chosenNamespace)
+	}
 
-	cronsListBatchV1Beta1, err := clientset.BatchV1beta1().CronJobs(o.chosenNamespace).List(context.TODO(), metav1.ListOptions{})
-	cronsListV1, err := clientset.BatchV1().CronJobs(o.chosenNamespace).List(context.TODO(), metav1.ListOptions{})
-	// fmt.Fprintf(o.Out, "Before cron range\n")
+	cronsListBatchV1Beta1, _ := clientset.BatchV1beta1().CronJobs(o.chosenNamespace).List(context.TODO(), metav1.ListOptions{})
+
+	cronsListV1, _ := clientset.BatchV1().CronJobs(o.chosenNamespace).List(context.TODO(), metav1.ListOptions{})
+
+	output := make(map[string]Output)
+
+	if o.debug {
+		fmt.Fprintf(o.Out, "Before cron range\n")
+	}
 	for _, cron := range cronsListBatchV1Beta1.Items {
-		o.CheckMissedCrons(cron.GetName(), cron.Spec.Schedule, cron.Status.LastScheduleTime.Time, *cron.Spec.Suspend)
+		o.CheckMissedCrons(cron.GetName(), cron.Spec.Schedule, cron.Status.LastScheduleTime.Time, *cron.Spec.Suspend, output)
 
 	}
 	for _, cron := range cronsListV1.Items {
-		o.CheckMissedCrons(cron.GetName(), cron.Spec.Schedule, cron.Status.LastScheduleTime.Time, *cron.Spec.Suspend)
+		o.CheckMissedCrons(cron.GetName(), cron.Spec.Schedule, cron.Status.LastScheduleTime.Time, *cron.Spec.Suspend, output)
 	}
-	// fmt.Fprintf(o.Out, "After cron range\n")
+	if o.debug {
+		fmt.Fprintf(o.Out, "After cron range\n")
+	}
+
+	if o.format == "json" {
+		o.PrintAsJson(output)
+	} else {
+		o.PrintAsTable(output)
+	}
+
 	return nil
 }
