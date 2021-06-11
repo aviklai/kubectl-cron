@@ -19,11 +19,14 @@ import (
 
 var (
 	cronExample = `
-	# view cronjobs
-	%[1]s cron
+	# view cronjobs in a namespace with a json format
+	%[1]s --namespace mynamespace
 
 	# view all cronjobs missed runs
-	%[1]s ns --missed
+	%[1]s --missed
+
+	# view all cronjobs in a table format
+	%[1]s --format table
 `
 )
 
@@ -57,7 +60,7 @@ func NewCmdCron(streams genericclioptions.IOStreams) *cobra.Command {
 	o := NewCronOptions(streams)
 
 	cmd := &cobra.Command{
-		Use:          "cron [deploymebt-name] [flags]",
+		Use:          "[flags]",
 		Short:        "View cronjobs and missed runs",
 		Example:      fmt.Sprintf(cronExample, "kubectl"),
 		SilenceUsage: true,
@@ -90,7 +93,7 @@ func (o *CronOptions) Validate() error {
 	return nil
 }
 
-func (o *CronOptions) CheckMissedCrons(cronName string, schedule string, lastScheduleTime time.Time, suspend bool, output map[string]Output) {
+func (o *CronOptions) FillCronStatus(cronName string, schedule string, lastScheduleTime time.Time, suspend bool, output map[string]Output) {
 	if o.missed && suspend {
 		return
 	}
@@ -98,15 +101,15 @@ func (o *CronOptions) CheckMissedCrons(cronName string, schedule string, lastSch
 	gron := gronx.New()
 	missedRun, _ := gron.IsDue(schedule)
 	lastScheduleTimeFormatted := lastScheduleTime.Format(time.RFC3339)
-	missedRunText := ""
+	missedRunFormatted := ""
 	if missedRun {
-		missedRunText = fmt.Sprintf(" Cron missed it's run!. Last run time: %s", lastScheduleTime.Format(time.RFC3339))
+		missedRunFormatted = fmt.Sprintf(" Cron missed it's run!. Last run time: %s", lastScheduleTime.Format(time.RFC3339))
 	}
 	cronOutput := Output{
 		Schedule:         schedule,
 		LastScheduleTime: lastScheduleTimeFormatted,
 		Suspended:        suspend,
-		Missed:           missedRunText,
+		Missed:           missedRunFormatted,
 	}
 
 	if o.missed {
@@ -171,11 +174,11 @@ func (o *CronOptions) Run() error {
 		fmt.Fprintf(o.Out, "Before cron range\n")
 	}
 	for _, cron := range cronsListBatchV1Beta1.Items {
-		o.CheckMissedCrons(cron.GetName(), cron.Spec.Schedule, cron.Status.LastScheduleTime.Time, *cron.Spec.Suspend, output)
+		o.FillCronStatus(cron.GetName(), cron.Spec.Schedule, cron.Status.LastScheduleTime.Time, *cron.Spec.Suspend, output)
 
 	}
 	for _, cron := range cronsListV1.Items {
-		o.CheckMissedCrons(cron.GetName(), cron.Spec.Schedule, cron.Status.LastScheduleTime.Time, *cron.Spec.Suspend, output)
+		o.FillCronStatus(cron.GetName(), cron.Spec.Schedule, cron.Status.LastScheduleTime.Time, *cron.Spec.Suspend, output)
 	}
 	if o.debug {
 		fmt.Fprintf(o.Out, "After cron range\n")
