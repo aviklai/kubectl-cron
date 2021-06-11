@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/adhocore/gronx"
+	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -98,11 +98,14 @@ func (o *CronOptions) FillCronStatus(cronName string, schedule string, lastSched
 		return
 	}
 
-	gron := gronx.New()
-	missedRun, _ := gron.IsDue(schedule)
+	cronParser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	parsedCron, _ := cronParser.Parse(schedule)
+	nextRun := parsedCron.Next(lastScheduleTime)
+	dt := time.Now()
 	lastScheduleTimeFormatted := lastScheduleTime.Format(time.RFC3339)
 	missedRunFormatted := ""
-	if missedRun {
+	missedRun := nextRun.Before(dt)
+	if missedRun && !suspend {
 		missedRunFormatted = fmt.Sprintf(" Cron missed it's run!. Last run time: %s", lastScheduleTime.Format(time.RFC3339))
 	}
 	cronOutput := Output{
