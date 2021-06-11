@@ -77,7 +77,7 @@ func NewCmdCron(streams genericclioptions.IOStreams) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&o.chosenNamespace, "namespace", "n", "default", "Namespace for search. (default: \"default\")")
-	cmd.Flags().StringVarP(&o.format, "format", "f", "json", "The format of the output. Possible choices: json, table")
+	cmd.Flags().StringVarP(&o.format, "format", "f", "table", "The format of the output. Possible choices: table, json")
 	cmd.Flags().BoolVarP(&o.missed, "missed", "m", false, "Show only missed runs")
 	cmd.Flags().BoolVarP(&o.debug, "debug", "d", false, "Debug")
 
@@ -169,7 +169,7 @@ func (o *CronOptions) Run() error {
 
 	cronsListBatchV1Beta1, _ := clientset.BatchV1beta1().CronJobs(o.chosenNamespace).List(context.TODO(), metav1.ListOptions{})
 
-	cronsListV1, _ := clientset.BatchV1().CronJobs(o.chosenNamespace).List(context.TODO(), metav1.ListOptions{})
+	cronsListBatchV1, _ := clientset.BatchV1().CronJobs(o.chosenNamespace).List(context.TODO(), metav1.ListOptions{})
 
 	output := make(map[string]Output)
 
@@ -180,17 +180,17 @@ func (o *CronOptions) Run() error {
 		o.FillCronStatus(cron.GetName(), cron.Spec.Schedule, cron.Status.LastScheduleTime.Time, *cron.Spec.Suspend, output)
 
 	}
-	for _, cron := range cronsListV1.Items {
+	for _, cron := range cronsListBatchV1.Items {
 		o.FillCronStatus(cron.GetName(), cron.Spec.Schedule, cron.Status.LastScheduleTime.Time, *cron.Spec.Suspend, output)
 	}
 	if o.debug {
 		fmt.Fprintf(o.Out, "After cron range\n")
 	}
 
-	if o.format == "json" {
-		o.PrintAsJson(output)
-	} else {
+	if o.format == "table" {
 		o.PrintAsTable(output)
+	} else {
+		o.PrintAsJson(output)
 	}
 
 	return nil
