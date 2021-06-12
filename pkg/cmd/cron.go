@@ -78,7 +78,7 @@ func NewCmdCron(streams genericclioptions.IOStreams) *cobra.Command {
 
 	cmd.Flags().StringVarP(&o.chosenNamespace, "namespace", "n", "default", "Namespace for search. (default: \"default\")")
 	cmd.Flags().StringVarP(&o.format, "format", "f", "table", "The format of the output. Possible choices: table, json")
-	cmd.Flags().BoolVarP(&o.missed, "missed", "m", false, "Show only missed runs")
+	cmd.Flags().BoolVarP(&o.missed, "missed", "m", false, "Show only crons with missed runs")
 	cmd.Flags().BoolVarP(&o.debug, "debug", "d", false, "Debug")
 
 	return cmd
@@ -106,7 +106,7 @@ func (o *CronOptions) FillCronStatus(cronName string, schedule string, lastSched
 	missedRunFormatted := ""
 	missedRun := nextRun.Before(dt)
 	if missedRun && !suspend {
-		missedRunFormatted = fmt.Sprintf(" Cron missed it's run!. Last run time: %s", lastScheduleTime.Format(time.RFC3339))
+		missedRunFormatted = fmt.Sprintf(" Cron missed it's run! Last schedule time: %s", lastScheduleTime.Format(time.RFC3339))
 	}
 	cronOutput := Output{
 		Schedule:         schedule,
