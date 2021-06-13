@@ -93,24 +93,31 @@ func (o *CronOptions) Validate() error {
 	return nil
 }
 
-func (o *CronOptions) FillCronStatus(cronName string, schedule string, lastScheduleTime time.Time, suspend bool, output map[string]Output) {
+func (o *CronOptions) FillCronStatus(cronName string, schedule string, lastScheduleTimeFormatted string, suspend bool, output map[string]Output) {
 	if o.missed && suspend {
 		return
 	}
 
-	cronParser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-	parsedCron, _ := cronParser.Parse(schedule)
-	nextRun := parsedCron.Next(lastScheduleTime)
-	dt := time.Now()
-	lastScheduleTimeFormatted := lastScheduleTime.Format(time.RFC3339)
+	nextRunFormatted := ""
 	missedRunFormatted := ""
-	missedRun := nextRun.Before(dt)
-	if missedRun && !suspend {
-		missedRunFormatted = fmt.Sprintf(" Cron missed it's run! Last schedule time: %s", lastScheduleTime.Format(time.RFC3339))
+	missedRun := false
+	if !suspend {
+		cronParser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		parsedCron, _ := cronParser.Parse(schedule)
+		lastScheduleTime, _ := time.Parse(time.RFC3339, lastScheduleTimeFormatted)
+		nextRun := parsedCron.Next(lastScheduleTime)
+		nextRunFormatted = nextRun.Format(time.RFC3339)
+		dt := time.Now()
+		missedRun = nextRun.Before(dt)
+		if missedRun {
+			missedRunFormatted = fmt.Sprintf(" Cron missed it's run! Last schedule time: %s", lastScheduleTimeFormatted)
+		}
 	}
+
 	cronOutput := Output{
 		Schedule:         schedule,
 		LastScheduleTime: lastScheduleTimeFormatted,
+		NextScheduleTime: nextRunFormatted,
 		Suspended:        suspend,
 		Missed:           missedRunFormatted,
 	}
@@ -137,11 +144,11 @@ func (o *CronOptions) PrintAsJson(output map[string]Output) error {
 func (o *CronOptions) PrintAsTable(output map[string]Output) error {
 	t := table.NewWriter()
 	t.SetOutputMirror(o.Out)
-	t.AppendHeader(table.Row{"#", "Cron Name", "Cron Schedule", "Last Schedule Time", "Suspended", "Missed"})
+	t.AppendHeader(table.Row{"#", "Cron Name", "Cron Schedule", "Last Schedule Time", "Next Schedule Time", "Suspended", "Missed"})
 	index := 0
 	for k, v := range output {
 		index++
-		t.AppendRow(table.Row{index, k, v.Schedule, v.LastScheduleTime, v.Suspended, v.Missed})
+		t.AppendRow(table.Row{index, k, v.Schedule, v.LastScheduleTime, v.NextScheduleTime, v.Suspended, v.Missed})
 		t.AppendSeparator()
 	}
 	t.Render()
@@ -177,11 +184,25 @@ func (o *CronOptions) Run() error {
 		fmt.Fprintf(o.Out, "Before cron range\n")
 	}
 	for _, cron := range cronsListBatchV1Beta1.Items {
-		o.FillCronStatus(cron.GetName(), cron.Spec.Schedule, cron.Status.LastScheduleTime.Time, *cron.Spec.Suspend, output)
+		if o.debug {
+			fmt.Fprintf(o.Out, "BatchV1Beta1 Cron: %v. Suspend: %v. Scheduled: %v\n", cron.GetName(), *cron.Spec.Suspend, cron.Spec.Schedule)
+		}
+		lastScheduleTimeFormatted := ""
+		if !*cron.Spec.Suspend {
+			lastScheduleTimeFormatted = cron.Status.LastScheduleTime.Time.Format(time.RFC3339)
+		}
+		o.FillCronStatus(cron.GetName(), cron.Spec.Schedule, lastScheduleTimeFormatted, *cron.Spec.Suspend, output)
 
 	}
 	for _, cron := range cronsListBatchV1.Items {
-		o.FillCronStatus(cron.GetName(), cron.Spec.Schedule, cron.Status.LastScheduleTime.Time, *cron.Spec.Suspend, output)
+		if o.debug {
+			fmt.Fprintf(o.Out, "BatchV1 Cron: %v. Suspend: %v. Scheduled: %v\n", cron.GetName(), *cron.Spec.Suspend, cron.Spec.Schedule)
+		}
+		lastScheduleTimeFormatted := ""
+		if !*cron.Spec.Suspend {
+			lastScheduleTimeFormatted = cron.Status.LastScheduleTime.Time.Format(time.RFC3339)
+		}
+		o.FillCronStatus(cron.GetName(), cron.Spec.Schedule, lastScheduleTimeFormatted, *cron.Spec.Suspend, output)
 	}
 	if o.debug {
 		fmt.Fprintf(o.Out, "After cron range\n")
