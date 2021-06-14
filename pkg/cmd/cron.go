@@ -110,7 +110,7 @@ func (o *CronOptions) FillCronStatus(cronName string, schedule string, lastSched
 		dt := time.Now()
 		missedRun = nextRun.Before(dt)
 		if missedRun {
-			missedRunFormatted = fmt.Sprintf(" Cron missed it's run! Last schedule time: %s", lastScheduleTimeFormatted)
+			missedRunFormatted = "Cron missed it's run!"
 		}
 	}
 
