@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -98,6 +99,8 @@ func (o *CronOptions) FillCronStatus(cronName string, schedule string, lastSched
 		return
 	}
 
+	utcLocation, _ := time.LoadLocation("UTC")
+	currentLocation := time.Now().Location()
 	nextRunFormatted := ""
 	missedRunFormatted := ""
 	missedRun := false
@@ -105,8 +108,9 @@ func (o *CronOptions) FillCronStatus(cronName string, schedule string, lastSched
 		cronParser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 		parsedCron, _ := cronParser.Parse(schedule)
 		lastScheduleTime, _ := time.Parse(time.RFC3339, lastScheduleTimeFormatted)
-		nextRun := parsedCron.Next(lastScheduleTime)
-		nextRunFormatted = nextRun.Format(time.RFC3339)
+		lastScheduleTime = lastScheduleTime.In(utcLocation)
+		nextRun := parsedCron.Next(lastScheduleTime).In(utcLocation)
+		nextRunFormatted = nextRun.In(currentLocation).Format(time.RFC3339)
 		dt := time.Now()
 		missedRun = nextRun.Before(dt)
 		if missedRun {
@@ -145,12 +149,20 @@ func (o *CronOptions) PrintAsTable(output map[string]Output) error {
 	t := table.NewWriter()
 	t.SetOutputMirror(o.Out)
 	t.AppendHeader(table.Row{"#", "Cron Name", "Cron Schedule", "Last Schedule Time", "Next Schedule Time", "Suspended", "Missed"})
+
+	keys := make([]string, 0)
+	for k, _ := range output {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	index := 0
-	for k, v := range output {
+	for _, k := range keys {
 		index++
+		v := output[k]
 		t.AppendRow(table.Row{index, k, v.Schedule, v.LastScheduleTime, v.NextScheduleTime, v.Suspended, v.Missed})
 		t.AppendSeparator()
 	}
+
 	t.Render()
 	return nil
 }
