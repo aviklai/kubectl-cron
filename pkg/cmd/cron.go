@@ -109,7 +109,7 @@ func (o *CronOptions) FillCronStatus(cronName string, schedule string, lastSched
 		parsedCron, _ := cronParser.Parse(schedule)
 		lastScheduleTime, _ := time.Parse(time.RFC3339, lastScheduleTimeFormatted)
 		lastScheduleTime = lastScheduleTime.In(utcLocation)
-		nextRun := parsedCron.Next(lastScheduleTime).In(utcLocation)
+		nextRun := parsedCron.Next(lastScheduleTime)
 		nextRunFormatted = nextRun.In(currentLocation).Format(time.RFC3339)
 		dt := time.Now()
 		missedRun = nextRun.Before(dt)
